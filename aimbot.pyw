@@ -1,4 +1,3 @@
-import threading
 import serial
 import serial.tools.list_ports
 import time
@@ -6,44 +5,36 @@ import cv2
 import numpy as np
 import mss
 import sys
-from pynput.mouse import Button, Controller
 
 
-class MouseTelemetryReader:
-    """Reads real-mouse movement/click events relayed by the Arduino
-    (arduino/mouse_telemetry/mouse_telemetry.ino, via the USB Host Shield)
-    over serial, in a background thread."""
+class HidTrigger:
+    """Talks to a native-USB board (Leonardo/Pro Micro/Micro) running
+    arduino/hid_click/hid_click.ino, which presents itself to the PC as
+    a real second USB mouse and performs a genuine HID click on command."""
 
     def __init__(self):
         self.serial_port = None
-        self.last_line = ''
-        self._stop = False
-        self._thread = None
         serial_port_name = self.find_serial_port()
         self.serial_port = serial.Serial(serial_port_name, 9600, timeout=1)
-        time.sleep(2)  # Arduino resets when the serial port opens
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
-        self._thread.start()
+        time.sleep(2)  # the board resets when the serial port opens
 
     def find_serial_port(self):
-        port = next((p for p in serial.tools.list_ports.comports() if "Arduino" in p.description), None)
+        keywords = ("Arduino", "Leonardo", "SparkFun", "Pro Micro")
+        port = next(
+            (p for p in serial.tools.list_ports.comports()
+             if any(k.lower() in (p.description or '').lower() for k in keywords)),
+            None,
+        )
         if port is not None:
             return port.device
-        print('[Error] Unable to find the Arduino. Check the USB connection and try again.')
+        print('[Error] Unable to find the HID board. Check the USB connection and try again.')
         time.sleep(5)
         sys.exit()
 
-    def _read_loop(self):
-        while not self._stop:
-            try:
-                line = self.serial_port.readline().decode(errors='ignore').strip()
-                if line:
-                    self.last_line = line
-            except serial.SerialException:
-                break
+    def click(self):
+        self.serial_port.write(b'click\n')
 
     def close(self):
-        self._stop = True
         if self.serial_port:
             self.serial_port.close()
 
@@ -54,8 +45,7 @@ class MouseTelemetryReader:
 class TriggerBot:
     def __init__(self, game_window, template_file=None):
         self.game_window = game_window
-        self.telemetry = MouseTelemetryReader()
-        self.mouse = Controller()
+        self.trigger = HidTrigger()
         self.sct = mss.mss()
         self.scale = 2
         self.min_distance = 30
@@ -66,8 +56,8 @@ class TriggerBot:
         self._last_fire = 0.0
 
     def __del__(self):
-        if hasattr(self, 'telemetry'):
-            del self.telemetry
+        if hasattr(self, 'trigger'):
+            del self.trigger
         if hasattr(self, 'sct'):
             del self.sct
 
@@ -111,7 +101,7 @@ class TriggerBot:
                 if (target is not None
                         and self.is_on_crosshair(target)
                         and now - self._last_fire > self.fire_cooldown):
-                    self.mouse.click(Button.left)
+                    self.trigger.click()
                     self._last_fire = now
             except Exception as e:
                 print(e)

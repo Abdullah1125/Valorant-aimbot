@@ -2,4 +2,3 @@ pyserial
 opencv-python
 numpy
 mss
-pynput
