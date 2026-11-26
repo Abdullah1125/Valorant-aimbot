@@ -1,3 +1,4 @@
+import threading
 import serial
 import serial.tools.list_ports
 import time
@@ -5,27 +6,24 @@ import cv2
 import numpy as np
 import mss
 import sys
+from pynput.mouse import Button, Controller
 
 
-class TriggerRelay:
-    """Talks to an Arduino Uno running arduino/trigger_relay/trigger_relay.ino,
-    which pulses a relay wired across the real mouse's left-click switch."""
+class MouseTelemetryReader:
+    """Reads real-mouse movement/click events relayed by the Arduino
+    (arduino/mouse_telemetry/mouse_telemetry.ino, via the USB Host Shield)
+    over serial, in a background thread."""
 
     def __init__(self):
         self.serial_port = None
-        self.serial_port_name = self.find_serial_port()
-        if self.serial_port_name:
-            self.serial_port = serial.Serial()
-            self.serial_port.baudrate = 9600
-            self.serial_port.timeout = 1
-            self.serial_port.port = self.serial_port_name
-            try:
-                self.serial_port.open()
-                time.sleep(2)  # Arduino resets when the serial port opens
-            except serial.SerialException:
-                print('[Error] Serial port already in use by another app. Close it and retry.')
-                time.sleep(5)
-                sys.exit()
+        self.last_line = ''
+        self._stop = False
+        self._thread = None
+        serial_port_name = self.find_serial_port()
+        self.serial_port = serial.Serial(serial_port_name, 9600, timeout=1)
+        time.sleep(2)  # Arduino resets when the serial port opens
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
 
     def find_serial_port(self):
         port = next((p for p in serial.tools.list_ports.comports() if "Arduino" in p.description), None)
@@ -35,10 +33,17 @@ class TriggerRelay:
         time.sleep(5)
         sys.exit()
 
-    def click(self):
-        self.serial_port.write(b'click\n')
+    def _read_loop(self):
+        while not self._stop:
+            try:
+                line = self.serial_port.readline().decode(errors='ignore').strip()
+                if line:
+                    self.last_line = line
+            except serial.SerialException:
+                break
 
     def close(self):
+        self._stop = True
         if self.serial_port:
             self.serial_port.close()
 
@@ -49,7 +54,8 @@ class TriggerRelay:
 class TriggerBot:
     def __init__(self, game_window, template_file=None):
         self.game_window = game_window
-        self.relay = TriggerRelay()
+        self.telemetry = MouseTelemetryReader()
+        self.mouse = Controller()
         self.sct = mss.mss()
         self.scale = 2
         self.min_distance = 30
@@ -60,8 +66,8 @@ class TriggerBot:
         self._last_fire = 0.0
 
     def __del__(self):
-        if hasattr(self, 'relay'):
-            del self.relay
+        if hasattr(self, 'telemetry'):
+            del self.telemetry
         if hasattr(self, 'sct'):
             del self.sct
 
@@ -105,7 +111,7 @@ class TriggerBot:
                 if (target is not None
                         and self.is_on_crosshair(target)
                         and now - self._last_fire > self.fire_cooldown):
-                    self.relay.click()
+                    self.mouse.click(Button.left)
                     self._last_fire = now
             except Exception as e:
                 print(e)
