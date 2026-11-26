@@ -1,0 +1,6 @@
+pyserial
+opencv-python
+numpy
+mss
+pytesseract
+pynput
