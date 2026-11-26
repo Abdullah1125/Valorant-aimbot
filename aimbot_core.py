@@ -72,6 +72,12 @@ class AimBot:
         self._last_fire = 0.0
         self._running = False
 
+        self.detection_mode = 'template'   # 'template' or 'color'
+        self.target_color_bgr = None       # (b, g, r), set via set_target_color()
+        self.color_tolerance = 15          # hue +/- tolerance (0-179 scale)
+        self.head_fraction = 0.15          # how far down the blob's bounding box the "head" sits
+        self.min_blob_area = 40            # ignore color blobs smaller than this (noise)
+
     def __del__(self):
         if hasattr(self, 'hid'):
             del self.hid
@@ -104,6 +110,40 @@ class AimBot:
         target_y = (best_y + th // 2) / self.scale
         return target_x, target_y
 
+    def set_target_color(self, bgr):
+        self.target_color_bgr = tuple(int(c) for c in bgr)
+
+    @staticmethod
+    def _hue_ranges(hue, tol):
+        lo, hi = hue - tol, hue + tol
+        if lo < 0:
+            return [(0, hi), (180 + lo, 179)]
+        if hi > 179:
+            return [(lo, 179), (0, hi - 180)]
+        return [(lo, hi)]
+
+    def find_target_by_color(self, bgr_img):
+        if self.target_color_bgr is None:
+            return None
+        hsv = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
+        target_hsv = cv2.cvtColor(
+            np.uint8([[list(self.target_color_bgr)]]), cv2.COLOR_BGR2HSV
+        )[0][0]
+        hue = int(target_hsv[0])
+
+        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        for lo, hi in self._hue_ranges(hue, int(self.color_tolerance)):
+            mask |= cv2.inRange(hsv, (lo, 60, 60), (hi, 255, 255))
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) < self.min_blob_area:
+            return None
+        x, y, w, h = cv2.boundingRect(largest)
+        return x + w / 2, y + h * self.head_fraction
+
     def stop(self):
         self._running = False
 
@@ -112,9 +152,14 @@ class AimBot:
         while self._running:
             try:
                 img = self.get_screenshot()
-                gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-                scaled_gray = cv2.resize(gray, (0, 0), fx=self.scale, fy=self.scale)
-                target = self.find_target(scaled_gray)
+
+                if self.detection_mode == 'color':
+                    target = self.find_target_by_color(img[:, :, :3])
+                else:
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+                    scaled_gray = cv2.resize(gray, (0, 0), fx=self.scale, fy=self.scale)
+                    target = self.find_target(scaled_gray)
+
                 now = time.time()
 
                 if target is not None:
