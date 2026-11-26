@@ -29,6 +29,8 @@ class AimbotPanel:
         self.aim_gain = tk.DoubleVar(value=1.0)
         self.fire_cooldown = tk.DoubleVar(value=0.25)
         self.color_tolerance = tk.DoubleVar(value=15)
+        self.offset_x = tk.DoubleVar(value=0)
+        self.offset_y = tk.DoubleVar(value=0)
         self.status_text = tk.StringVar(value="Durum: Durduruldu")
 
         self._build_ui()
@@ -65,6 +67,8 @@ class AimbotPanel:
         self._add_slider(frm_settings, 1, "Max Adım (px)", self.max_step, 5, 100)
         self._add_slider(frm_settings, 2, "Aim Gain", self.aim_gain, 0.1, 3.0)
         self._add_slider(frm_settings, 3, "Ateş Bekleme (sn)", self.fire_cooldown, 0.05, 1.0)
+        self._add_slider(frm_settings, 4, "X Ofseti (px)", self.offset_x, -200, 200)
+        self._add_slider(frm_settings, 5, "Y Ofseti (px)", self.offset_y, -200, 200)
 
         frm_controls = ttk.Frame(self.root)
         frm_controls.grid(row=4, column=0, sticky="ew", **pad)
@@ -106,6 +110,8 @@ class AimbotPanel:
             self.bot.aim_gain = self.aim_gain.get()
             self.bot.fire_cooldown = self.fire_cooldown.get()
             self.bot.color_tolerance = self.color_tolerance.get()
+            self.bot.target_offset_x = self.offset_x.get()
+            self.bot.target_offset_y = self.offset_y.get()
             if self.target_color_bgr is not None:
                 self.bot.set_target_color(self.target_color_bgr)
 

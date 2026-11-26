@@ -77,6 +77,8 @@ class AimBot:
         self.color_tolerance = 15          # hue +/- tolerance (0-179 scale)
         self.head_fraction = 0.15          # how far down the blob's bounding box the "head" sits
         self.min_blob_area = 40            # ignore color blobs smaller than this (noise)
+        self.target_offset_x = 0           # px added to the detected point, either mode (+right/-left)
+        self.target_offset_y = 0           # px added to the detected point, either mode (+down/-up)
 
     def __del__(self):
         if hasattr(self, 'hid'):
@@ -163,8 +165,8 @@ class AimBot:
                 now = time.time()
 
                 if target is not None:
-                    dx = target[0] - self.center_x
-                    dy = target[1] - self.center_y
+                    dx = target[0] + self.target_offset_x - self.center_x
+                    dy = target[1] + self.target_offset_y - self.center_y
                     distance = (dx ** 2 + dy ** 2) ** 0.5
 
                     if distance <= self.min_distance:
