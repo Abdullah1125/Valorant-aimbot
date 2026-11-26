@@ -7,10 +7,10 @@ import mss
 import sys
 
 
-class HidTrigger:
+class HidMouse:
     """Talks to a native-USB board (Leonardo/Pro Micro/Micro) running
-    arduino/hid_click/hid_click.ino, which presents itself to the PC as
-    a real second USB mouse and performs a genuine HID click on command."""
+    arduino/hid_mouse/hid_mouse.ino, which presents itself to the PC as
+    a real second USB mouse and performs genuine HID move/click commands."""
 
     def __init__(self):
         self.serial_port = None
@@ -31,6 +31,11 @@ class HidTrigger:
         time.sleep(5)
         sys.exit()
 
+    def move(self, dx, dy):
+        if dx == 0 and dy == 0:
+            return
+        self.serial_port.write(f'move {dx} {dy}\n'.encode())
+
     def click(self):
         self.serial_port.write(b'click\n')
 
@@ -42,13 +47,15 @@ class HidTrigger:
         self.close()
 
 
-class TriggerBot:
+class AimBot:
     def __init__(self, game_window, template_file=None):
         self.game_window = game_window
-        self.trigger = HidTrigger()
+        self.hid = HidMouse()
         self.sct = mss.mss()
         self.scale = 2
-        self.min_distance = 30
+        self.min_distance = 30      # px within which we consider the crosshair "on target"
+        self.max_step = 40          # px moved towards the target per frame (smoothing)
+        self.aim_gain = 1.0         # scales screen-space error to mouse-move units
         self.fire_cooldown = 0.25
         self.center_x = self.game_window['width'] // 2
         self.center_y = self.game_window['height'] // 2
@@ -56,8 +63,8 @@ class TriggerBot:
         self._last_fire = 0.0
 
     def __del__(self):
-        if hasattr(self, 'trigger'):
-            del self.trigger
+        if hasattr(self, 'hid'):
+            del self.hid
         if hasattr(self, 'sct'):
             del self.sct
 
@@ -85,11 +92,6 @@ class TriggerBot:
         target_y = (best_y + th // 2) / self.scale
         return target_x, target_y
 
-    def is_on_crosshair(self, target):
-        x, y = target
-        distance = ((x - self.center_x) ** 2 + (y - self.center_y) ** 2) ** 0.5
-        return distance <= self.min_distance
-
     def run(self):
         while True:
             try:
@@ -98,11 +100,20 @@ class TriggerBot:
                 scaled_gray = cv2.resize(gray, (0, 0), fx=self.scale, fy=self.scale)
                 target = self.find_target(scaled_gray)
                 now = time.time()
-                if (target is not None
-                        and self.is_on_crosshair(target)
-                        and now - self._last_fire > self.fire_cooldown):
-                    self.trigger.click()
-                    self._last_fire = now
+
+                if target is not None:
+                    dx = target[0] - self.center_x
+                    dy = target[1] - self.center_y
+                    distance = (dx ** 2 + dy ** 2) ** 0.5
+
+                    if distance <= self.min_distance:
+                        if now - self._last_fire > self.fire_cooldown:
+                            self.hid.click()
+                            self._last_fire = now
+                    else:
+                        step_x = int(max(-self.max_step, min(self.max_step, dx * self.aim_gain)))
+                        step_y = int(max(-self.max_step, min(self.max_step, dy * self.aim_gain)))
+                        self.hid.move(step_x, step_y)
             except Exception as e:
                 print(e)
             time.sleep(0.01)
@@ -113,5 +124,5 @@ if __name__ == '__main__':
     template_file = sys.argv[1] if len(sys.argv) > 1 else None
     if template_file is None:
         print('[Info] No template image given; pass one as an argument: python aimbot.pyw <template.png>')
-    bot = TriggerBot(game_window, template_file)
+    bot = AimBot(game_window, template_file)
     bot.run()
